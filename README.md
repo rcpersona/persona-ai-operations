@@ -46,6 +46,7 @@ make agent-bridge-check
 | Онбординг компанії | `onboarding` | `context/onboarding/` |
 | Confluence | `confluence-import` | `tools/confluence-import` → `context/docs/confluence/` |
 | Продукти | `products` | `context/products/<product-name>/` (git submodule) |
+| Анкети, вакансії та звіти RCPersona | [Persona AI Connector](integrations/rcpersona/README.md) | `integrations/rcpersona/` |
 | Задачі | `productivity-update` | `workspace/TASKS.md` |
 | Текст | `humor-writer`, субагент `writing-editor` | — |
 | Голос | `tone-of-voice` | `workspace/my_voice.md` |
@@ -63,7 +64,7 @@ make agent-bridge-check
 
 Реєстри чатів, токени, пошта, клієнти, проєкти Jira, папки Telegram і тексти онбордингу конкретної компанії. У шаблонах стоять `jira.example.com`, `folio.example.com`, порожні chatId.
 
-Немає класифікатора вхідної пошти, масових скриптів переносу тікетів, фінансів, CRM, HR і продуктових інтеграцій.
+Немає класифікатора вхідної пошти, масових скриптів переносу тікетів, фінансів чи CRM.
 
 `node_modules` і віртуальне оточення Python не скопійовані. Teams і Telegram треба зібрати локально (`npm install` / `bun install`). Інструкції — у README відповідного `tools/`.
 

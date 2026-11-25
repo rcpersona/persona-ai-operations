@@ -479,6 +479,8 @@ def handle_after_response(data: dict[str, Any]) -> None:
     day = datetime.now().strftime("%Y-%m-%d")
     state_path = _latest_state_path(root, data)
     state = _hydrate_legacy_state(root, data, _read_state(state_path))
+    if state.get("private_rcpersona_turn"):
+        return
     user_prompt = str(state.get("prompt") or "")
     _, _, redact_text = _journal_module(root)
     assistant = redact_text(assistant[:MAX_STORED_RESPONSE_CHARS])
@@ -512,11 +514,18 @@ def handle_tool_result(data: dict[str, Any], *, failed: bool) -> None:
         return
 
     def mutate(state: dict[str, Any]) -> None:
+        name = str(data.get("tool_name") or "unknown")
+        command = str(data.get("tool_input") or "")
+        if "mcp__rcpersona__" in name or ("rcpersona" in command and "cli.mjs" in command and " tool " in command):
+            state.update(private_rcpersona_turn=True, prompt="", prompt_summary="",
+                         assistant_response="", assistant_summary="", attachments=[], errors=[])
+            return
+        if state.get("private_rcpersona_turn"):
+            return
         tools = state.setdefault(
             "tools",
             {"calls": 0, "failures": 0, "duration_ms": 0, "by_name": {}},
         )
-        name = str(data.get("tool_name") or "unknown")
         by_name = tools.setdefault("by_name", {})
         item = by_name.setdefault(name, {"calls": 0, "failures": 0, "duration_ms": 0})
         tools["calls"] = int(tools.get("calls") or 0) + 1
@@ -596,7 +605,7 @@ def handle_stop(data: dict[str, Any]) -> None:
         return
     state_path = _latest_state_path(root, data)
     state = _hydrate_legacy_state(root, data, _read_state(state_path))
-    if not state or state.get("journaled"):
+    if not state or state.get("journaled") or state.get("private_rcpersona_turn"):
         return
     analyze_user_feedback, append_operation, _ = _journal_module(root)
     prompt = str(state.get("prompt") or "")
