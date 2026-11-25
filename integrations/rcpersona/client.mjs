@@ -43,23 +43,33 @@ const statuses = {
 
 export async function request(credentials, path, args = {}, fetcher = fetch) {
   const url = new URL("/wp-json/persona-ai/v1/" + path, siteOrigin(credentials.site));
+  const privateSearch = {};
   for (const [key, value] of Object.entries(args)) {
-    if (key !== "id" && value !== undefined) url.searchParams.set(key, String(value));
+    if (key === "id" || value === undefined) continue;
+    if (["q", "email", "phone", "experience"].includes(key)) privateSearch[key] = value;
+    else url.searchParams.set(key, String(value));
   }
   const authorization = Buffer.from(`${credentials.login}:${credentials.password}`, "utf8").toString("base64");
+  const headers = { Authorization: "Basic " + authorization, Accept: "application/json", "Cache-Control": "no-store" };
+  if (Object.keys(privateSearch).length) {
+    headers["X-RCPersona-Search"] = Buffer.from(JSON.stringify(privateSearch), "utf8").toString("base64");
+  }
   let response;
   try {
     response = await fetcher(url, {
       method: "GET",
       redirect: "error",
       signal: AbortSignal.timeout(15000),
-      headers: { Authorization: "Basic " + authorization, Accept: "application/json", "Cache-Control": "no-store" },
+      headers,
     });
   } catch {
     throw new Error("RCPersona HTTPS request failed. Check the origin, network, and certificate.");
   }
   if (!response.ok) {
     await response.body?.cancel();
+    if (response.status === 429 && path === "employees/lookup") {
+      throw new Error("RCPersona directory lookup rate limit reached. Retry later.");
+    }
     if (response.status === 503 && args.peopleforce) {
       throw new Error("PeopleForce linkage could not be read from RCPersona.");
     }
@@ -107,6 +117,26 @@ export async function whoami(credentials) {
     permissions: {
       read_candidates: profile.permissions.read_candidates,
       read_vacancies: profile.permissions.read_vacancies,
+      ...Object.fromEntries(["read_candidate_contacts", "lookup_employee", "read_team_statistics"]
+        .filter(key => typeof profile.permissions[key] === "boolean")
+        .map(key => [key, profile.permissions[key]])),
     },
   };
+}
+
+export async function callTool(credentials, path, args, fetcher = fetch) {
+  let capabilities;
+  try {
+    capabilities = await request(credentials, "capabilities", {}, fetcher);
+  } catch (error) {
+    if (error.message === statuses[404]) {
+      throw new Error("Update the RCPersona WordPress component. This connector requires component 1.1 or newer on API v1.");
+    }
+    throw error;
+  }
+  const version = /^1\.(\d+)\.\d+$/.exec(capabilities.component_version);
+  if (capabilities.api_version !== 1 || !version || Number(version[1]) < 1 || !capabilities.entities) {
+    throw new Error("Incompatible RCPersona API. Update the WordPress component or MCP connector.");
+  }
+  return path === "capabilities" ? capabilities : request(credentials, path, args, fetcher);
 }

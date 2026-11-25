@@ -3,7 +3,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { request, siteOrigin } from "./client.mjs";
+import { callTool, request, siteOrigin } from "./client.mjs";
 import { tools } from "./tools.mjs";
 
 const synthetic = { site: "https://fixture.invalid", login: "fixture", password: "synthetic-password" };
@@ -15,11 +15,13 @@ test("HTTPS origin validation", () => {
   }
 });
 
-test("API requests use GET, disable redirects and encode filters", async () => {
-  const data = await request(synthetic, "candidates", { q: "C++ & PLC", limit: 5 }, async (url, opts) => {
+test("API requests use GET and keep private search terms out of URLs", async () => {
+  const data = await request(synthetic, "candidates", { q: "C++ & PLC", email: "sample@fixture.invalid", limit: 5 }, async (url, opts) => {
     assert.equal(url.origin, synthetic.site);
     assert.equal(url.pathname, "/wp-json/persona-ai/v1/candidates");
-    assert.equal(url.searchParams.get("q"), "C++ & PLC");
+    assert.equal(url.search, "?limit=5");
+    assert.deepEqual(JSON.parse(Buffer.from(opts.headers["X-RCPersona-Search"], "base64")),
+      { q: "C++ & PLC", email: "sample@fixture.invalid" });
     assert.equal(opts.method, "GET");
     assert.equal(opts.redirect, "error");
     assert.equal(opts.headers.Authorization, "Basic " + Buffer.from("fixture:synthetic-password").toString("base64"));
@@ -37,7 +39,7 @@ test("authentication errors and oversized responses do not leak response content
     /oversized/);
 });
 
-test("stdio MCP advertises all eight tools and validates integer identifiers", async () => {
+test("stdio MCP advertises all recruiting tools and validates integer identifiers", async () => {
   const client = new Client({ name: "rcpersona-test", version: "1" });
   try {
     await client.connect(new StdioClientTransport({
@@ -45,7 +47,7 @@ test("stdio MCP advertises all eight tools and validates integer identifiers", a
       args: [fileURLToPath(new URL("./mcp.mjs", import.meta.url))],
     }));
     const result = await client.listTools();
-    assert.equal(result.tools.length, 8);
+    assert.equal(result.tools.length, 16);
     assert.deepEqual(result.tools.map(tool => tool.name).sort(), Object.keys(tools).sort());
     assert.ok(result.tools.every(tool => tool.annotations?.readOnlyHint));
     const invalid = await client.callTool({ name: "persona_get_candidate", arguments: { id: "99/other" } });
@@ -54,6 +56,25 @@ test("stdio MCP advertises all eight tools and validates integer identifiers", a
   } finally {
     await client.close();
   }
+});
+
+test("verify component compatibility before a data query using current server capabilities", async () => {
+  const paths = [];
+  const data = await callTool(synthetic, "candidates/42", { id: 42, include_contacts: true }, async url => {
+    paths.push(url.pathname);
+    return url.pathname.endsWith("/capabilities")
+      ? Response.json({ api_version: 1, component_version: "1.1.0", entities: { candidates: {} } })
+      : Response.json({ id: 42, contacts: { email: "sample@fixture.invalid" } });
+  });
+  assert.deepEqual(paths, ["/wp-json/persona-ai/v1/capabilities", "/wp-json/persona-ai/v1/candidates/42"]);
+  assert.equal(data.id, 42);
+  for (const version of ["1.0.9", "2.0.0", "unknown"]) {
+    await assert.rejects(callTool(synthetic, "candidates", {}, async url => {
+      assert.ok(url.pathname.endsWith("/capabilities"));
+      return Response.json({ api_version: 1, component_version: version, entities: {} });
+    }), /Incompatible/);
+  }
+  await assert.rejects(callTool(synthetic, "candidates", {}, async () => Response.json({}, { status: 404 })), /Update the RCPersona WordPress component/);
 });
 
 test("browser consent sends only the challenge to start and keeps password out of the URL", async () => {

@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { browserCredentials, normalizePassword, productionSite } from "./authorization.mjs";
-import { loadCredentials, request, siteOrigin, whoami } from "./client.mjs";
+import { loadCredentials, callTool, siteOrigin, whoami } from "./client.mjs";
 import { tools } from "./tools.mjs";
 
 const credentialScript = fileURLToPath(new URL("./credentials.ps1", import.meta.url));
@@ -48,7 +48,7 @@ try {
       throw new Error("Invalid RCPersona read tool parameters.");
     }
     const credentials = await loadCredentials();
-    const result = name === "persona_whoami" ? await whoami(credentials) : await request(credentials, route(parameters), parameters);
+    const result = name === "persona_whoami" ? await whoami(credentials) : await callTool(credentials, route(parameters), parameters);
     console.log(JSON.stringify(result));
   } else {
     let profile;
