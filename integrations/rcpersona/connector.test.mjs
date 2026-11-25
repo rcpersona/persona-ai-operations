@@ -55,3 +55,48 @@ test("stdio MCP advertises all eight tools and validates integer identifiers", a
     await client.close();
   }
 });
+
+test("browser consent sends only the challenge to start and keeps password out of the URL", async () => {
+  const { browserCredentials } = await import("./authorization.mjs");
+  const verifier = "b".repeat(64);
+  const token = "1234567890." + "a".repeat(64) + "." + "c".repeat(64);
+  let requests = 0;
+  let opened = false;
+  const result = await browserCredentials(synthetic.site, {
+    verifier,
+    launch: async url => {
+      opened = true;
+      assert.equal(url.searchParams.get("state"), token);
+      assert.equal(url.href.includes(verifier), false);
+    },
+    sleep: async () => {},
+    fetcher: async (url, init) => {
+      const body = JSON.parse(init.body);
+      assert.equal(init.redirect, "error");
+      assert.equal(url.search, "");
+      requests++;
+      if (url.pathname.endsWith("/start")) {
+        assert.equal(Object.keys(body).join(), "challenge");
+        assert.notEqual(body.challenge, verifier);
+        return Response.json({ state: token, expires_in: 300,
+          authorization_url: synthetic.site + "/wp-admin/admin-post.php?action=rcp_ai_authorize&state=" + token });
+      }
+      assert.ok(opened);
+      assert.equal(body.verifier, verifier);
+      return requests === 2 ? Response.json({ status: "pending" }, { status: 202 })
+        : Response.json({ login: "fixture", password: "abcd efgh ijkl mnop qrst uvwx" });
+    },
+  });
+  assert.equal(result.password, "abcdefghijklmnopqrstuvwx");
+  assert.equal(requests, 3);
+});
+
+test("browser consent rejects foreign authorization URLs before launching", async () => {
+  const { browserCredentials, normalizePassword } = await import("./authorization.mjs");
+  assert.equal(normalizePassword("abcd\tefgh ijkl\nmnop\u00a0qrst uvwx"), "abcdefghijklmnopqrstuvwx");
+  assert.throws(() => normalizePassword("wrong"));
+  await assert.rejects(browserCredentials(synthetic.site, {
+    launch: () => assert.fail("must not open a foreign URL"),
+    fetcher: async () => Response.json({ authorization_url: "https://foreign.invalid/" }),
+  }), /invalid authorization session/);
+});

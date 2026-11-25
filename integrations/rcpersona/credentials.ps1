@@ -1,4 +1,4 @@
-param([Parameter(Mandatory=$true)][ValidateSet('read','connect','disconnect')][string]$Action)
+param([Parameter(Mandatory=$true)][ValidateSet('read','write','connect','disconnect')][string]$Action)
 
 $ErrorActionPreference = 'Stop'
 $directory = Join-Path $env:LOCALAPPDATA 'RCPersonaConnector'
@@ -7,7 +7,31 @@ $utf8 = New-Object System.Text.UTF8Encoding($false)
 [Console]::OutputEncoding = $utf8
 $OutputEncoding = $utf8
 
+function Save-ProtectedPayload([string]$payload) {
+    $protected = ConvertTo-SecureString -String $payload -AsPlainText -Force
+    try { $encrypted = ConvertFrom-SecureString -SecureString $protected }
+    finally { $protected.Dispose() }
+
+    [IO.Directory]::CreateDirectory($directory) | Out-Null
+    $pending = Join-Path $directory ([Guid]::NewGuid().ToString() + '.dat')
+    try {
+        [IO.File]::WriteAllText($pending, $encrypted, $utf8)
+        if ([IO.File]::Exists($file)) { [IO.File]::Replace($pending, $file, $null) }
+        else { [IO.File]::Move($pending, $file) }
+    } finally {
+        if ([IO.File]::Exists($pending)) { [IO.File]::Delete($pending) }
+    }
+}
+
 try {
+    if ($Action -eq 'write') {
+        [Console]::InputEncoding = $utf8
+        $payload = [Console]::In.ReadToEnd()
+        if (!$payload -or $payload.Length -gt 8192) { throw 'Invalid credential input.' }
+        Save-ProtectedPayload $payload
+        exit 0
+    }
+
     if ($Action -eq 'disconnect') {
         if (Test-Path -LiteralPath $file) { Remove-Item -LiteralPath $file }
         Write-Host 'Local RCPersona credentials removed.'
@@ -26,8 +50,7 @@ try {
         exit 0
     }
 
-    $site = Read-Host 'HTTPS site URL [https://rcpersona.com]'
-    if (!$site) { $site = 'https://rcpersona.com' }
+    $site = 'https://rcpersona.com'
     $login = Read-Host 'WordPress login'
     if (!$login -or $login.Contains(':')) { throw 'Enter a valid WordPress login.' }
     $password = Read-Host 'WordPress Application Password' -AsSecureString
@@ -39,19 +62,7 @@ try {
         $profile = $payload | & node --use-system-ca (Join-Path $PSScriptRoot 'cli.mjs') verify
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-        $protected = ConvertTo-SecureString -String $payload -AsPlainText -Force
-        try { $encrypted = ConvertFrom-SecureString -SecureString $protected }
-        finally { $protected.Dispose() }
-
-        [IO.Directory]::CreateDirectory($directory) | Out-Null
-        $pending = Join-Path $directory ([Guid]::NewGuid().ToString() + '.dat')
-        try {
-            [IO.File]::WriteAllText($pending, $encrypted, $utf8)
-            if ([IO.File]::Exists($file)) { [IO.File]::Replace($pending, $file, $null) }
-            else { [IO.File]::Move($pending, $file) }
-        } finally {
-            if ([IO.File]::Exists($pending)) { [IO.File]::Delete($pending) }
-        }
+        Save-ProtectedPayload $payload
         Write-Output $profile
     } finally {
         [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($pointer)

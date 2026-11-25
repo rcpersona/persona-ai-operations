@@ -21,7 +21,7 @@ export async function loadCredentials() {
       ["-NoProfile", "-NonInteractive", "-File", credentialScript, "read"],
       { windowsHide: true, timeout: 8000, maxBuffer: 8192, encoding: "utf8" });
   } catch {
-    throw new Error("Local credentials are unavailable. Run connect.bat in your Windows account.");
+    throw new Error("Local credentials are unavailable. Ask Codex to connect to RCPersona again.");
   }
   try {
     const { site, login, password } = JSON.parse(result.stdout);
@@ -97,5 +97,16 @@ export async function whoami(credentials) {
       typeof profile.permissions?.read_vacancies !== "boolean") {
     throw new Error("RCPersona did not confirm an active profile and connector permissions.");
   }
-  return profile;
+  return {
+    connector: profile.connector,
+    user_id: profile.user_id,
+    active: true,
+    display_name: typeof profile.display_name === "string" ? profile.display_name.slice(0, 200) : "",
+    roles: Array.isArray(profile.roles) ? profile.roles.filter(role => typeof role === "string").slice(0, 20) : [],
+    access_mode: "read_only",
+    permissions: {
+      read_candidates: profile.permissions.read_candidates,
+      read_vacancies: profile.permissions.read_vacancies,
+    },
+  };
 }

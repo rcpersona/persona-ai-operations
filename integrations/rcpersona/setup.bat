@@ -10,7 +10,7 @@ if errorlevel 1 (
     echo Install the Codex CLI and add it to PATH.
     exit /b 1
 )
-call npm --prefix "%~dp0." ci --ignore-scripts
+if not exist "%~dp0node_modules\@modelcontextprotocol\sdk\package.json" call npm --prefix "%~dp0." ci --ignore-scripts
 if errorlevel 1 exit /b 1
 call codex mcp add rcpersona -- node --use-system-ca "%~dp0mcp.mjs"
 exit /b %errorlevel%
